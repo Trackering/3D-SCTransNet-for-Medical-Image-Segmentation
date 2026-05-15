@@ -2,8 +2,7 @@ from typing import Tuple,List,Optional
 import torch.nn as nn
 from . import Blocks as bs
 from . import AttentionResBlock as arb
-from .SwinEncoder import SwinEncoder
-from .APAUNetBlocks import SpatialAttentionDecoder,SpatialAttentionEncoder
+
 class ModuleBuilder:
     '''
     模块构建器，用于动态创建网络中的各种组件
@@ -417,82 +416,6 @@ class ModuleBuilder:
         return attention_blocks
     
     @staticmethod
-    def Get_swin_encoders(
-        in_channels: int,
-        img_size: Tuple[int, ...],
-        features_per_stage: List[int],
-        strides: List[Tuple[int, ...]],
-        depths: List[int] = None,
-        num_heads: List[int] = None,
-        window_size: Tuple[int, ...] = (7, 7, 7),
-        mlp_ratio: float = 4.0,
-        drop_rate: float = 0.0,
-        attn_drop_rate: float = 0.0,
-        drop_path_rate: float = 0.1,
-        use_checkpoint: bool = False,
-        spatial_dims: int = 3,
-        debug: bool = False,
-    ) -> nn.Module:
-        '''
-        创建 Swin UNETR 的编码器部分，基于 Swin Transformer 构建多阶段分层特征提取网络。
-
-        Args:
-            in_channels (int): 输入图像的通道数。
-            img_size (Tuple[int, ...]): 输入图像的尺寸，例如 (96, 96, 96) 对于 3D 输入。
-            features_per_stage (List[int]): 每个阶段的输出特征通道数列表。例如 [48, 96, 192, 384]。
-            strides (List[Tuple[int, ...]]): 每个阶段的 patch 合并（下采样）步长列表。每个元素是一个与 spatial_dims 长度相同的元组。
-            depths (List[int], optional): 每个阶段中 Swin Transformer block 的层数。为None时自动计算。
-            num_heads (List[int], optional): 每个阶段中多头注意力的头数。为None时自动计算。注意！对应阶段的features_per_stage必须能被num_heads整除
-            window_size (Tuple[int, ...], optional): 窗口注意力机制的窗口大小。对于 3D 输入默认为 (7, 7, 7)。
-            mlp_ratio (float, optional): MLP 隐藏层维度相对于嵌入维度的扩展比例。默认为 4.0。
-            drop_rate (float, optional): 输入 embeddings 的 dropout 率。默认为 0.0。
-            attn_drop_rate (float, optional): 注意力权重的 dropout 率。默认为 0.0。
-            drop_path_rate (float, optional): 随机深度（stochastic depth）的丢弃率。默认为 0.1。
-            use_checkpoint (bool, optional): 是否使用梯度检查点（torch.utils.checkpoint）以节省内存。默认为 False。
-            spatial_dims (int, optional): 空间维度数，支持 2 或 3。默认为 3。
-            debug (bool, optional): 如果为 True，打印调试信息（例如各阶段的尺寸）。默认为 False。
-
-        Returns:
-            nn.Module: 返回构建的 Swin Transformer 编码器模块，通常是一个包含多个阶段的 nn.Module。
-        '''
-        n_stages = len(features_per_stage)
-        if depths is None:
-            depths = [2] * (n_stages - 1)
-
-        if num_heads is None:
-            num_heads = [2**(i+2) for i in range(n_stages-1)]#先自己生成一个常见的num_heads列表，然后再做必要的调整
-            for i in range(n_stages-1):
-                feat= features_per_stage[i+1]   # 跳过第一个阶段（stem 输出）
-                num_heads[i] = ModuleBuilder._get_suitable_num_heads(feat,num_heads[i])#做必要的调整
-        
-        #检查最容易出错的，但一出错又不容易找到问题的参数。为啥？我可是找了3个小时才发现，必须做下记号！
-        for i in range(len(features_per_stage)-1):
-            if features_per_stage[i]%num_heads[i]!=0:
-                f"对应阶段的通道数必须能被num_heads整除！阶段={i}"
-
-        # 确保 num_heads 长度与阶段数匹配（少一个阶段，因为第一阶段没有下采样？）
-        # SwinStage 的数量为 n_stages-1，每个 stage 对应一个 num_heads
-        assert len(num_heads) == n_stages - 1, f"num_heads length {len(num_heads)} != n_stages-1 {n_stages-1}"
-
-        return SwinEncoder(
-            in_channels=in_channels,
-            img_size=img_size,
-            features_per_stage=features_per_stage,
-            strides=strides,
-            depths=depths,
-            num_heads=num_heads,
-            window_size=window_size,
-            mlp_ratio=mlp_ratio,
-            drop_rate=drop_rate,
-            attn_drop_rate=attn_drop_rate,
-            drop_path_rate=drop_path_rate,
-            norm_layer=nn.LayerNorm,
-            use_checkpoint=use_checkpoint,
-            spatial_dims=spatial_dims,
-            debug=debug,
-        )
-    
-    @staticmethod
     def _get_suitable_num_heads(channel: int, target_heads: int) -> int:
         """
         根据特征通道数 channel 和目标头数 target_heads，返回一个能整除 channel 且最接近 target_heads 的头数。
@@ -523,79 +446,6 @@ class ModuleBuilder:
                     best_heads = h
 
         return best_heads
-    
-    @staticmethod
-    def Get_APAUNet_encoders(features_per_stage, strides, n_conv_per_stage=None):
-        """
-        根据 nnU‑Net 风格配置生成 APAUNet 的编码器列表。
-
-        参数:
-            features_per_stage (list): 每个阶段的输出通道数，长度 = n_stages
-            strides (list): 每个阶段的步长（下采样因子），长度 = n_stages
-            n_conv_per_stage (list, optional): 每个阶段的卷积层数（保留接口，暂未使用）
-        返回:
-            nn.ModuleList: 包含从阶段1到阶段 n_stages-1 的编码器块
-        """
-        n_stages = len(features_per_stage)
-        encoders = nn.ModuleList()
-
-        # 阶段0由 stem 处理，因此编码器从阶段1开始到最后一个阶段
-        for i in range(1, n_stages):
-            in_ch = features_per_stage[i-1]   # 前一阶段输出通道
-            out_ch = features_per_stage[i]    # 当前阶段输出通道
-            stride = strides[i]                # 当前阶段的下采样步长
-
-            last_layer = (i == n_stages - 1)  # 最后一层无池化
-
-            encoder = SpatialAttentionEncoder(
-                in_ch=in_ch,
-                out_ch=out_ch,
-                last_layer=last_layer,
-                pool_stride=stride   # 池化核大小默认与步长相同
-            )
-            encoders.append(encoder)
-
-        return encoders
-
-    @staticmethod
-    def Get_APAUNet_decoders(features_per_stage, strides, n_conv_per_stage_decoder=None):
-        """
-        根据 nnU‑Net 风格配置生成 APAUNet 的解码器列表。
-
-        参数:
-            features_per_stage (list): 每个阶段的输出通道数，长度 = n_stages
-            strides (list): 每个阶段的步长（下采样因子），长度 = n_stages
-            n_conv_per_stage_decoder (list, optional): 解码器每个阶段的卷积层数（保留接口）
-        返回:
-            nn.ModuleList: 包含从深到浅的解码器块
-        """
-        n_stages = len(features_per_stage)
-        num_decoders = n_stages - 1
-
-        # 上采样因子与 strides 对称：去掉 strides[0]（输入层步长），然后反转
-        upsample_factors = list(reversed(strides[1:]))
-
-        decoders = nn.ModuleList()
-        for i in range(num_decoders):
-            # 第一个解码器输入来自最深层特征
-            if i == 0:
-                x_ch = features_per_stage[-1]
-            else:
-                x_ch = out_ch   # 上一解码器的输出
-
-            skip_ch = features_per_stage[-(i+2)]
-            out_ch = skip_ch    # 输出通道与跳跃连接相同（保持对称）
-
-            upsample_factor = upsample_factors[i]
-
-            decoder = SpatialAttentionDecoder(
-                in_ch=x_ch,
-                out_ch=out_ch,
-                upsample_factor=upsample_factor
-            )
-            decoders.append(decoder)
-
-        return decoders
     
     @staticmethod
     def Get_upsamples(features_size,bestsize):
