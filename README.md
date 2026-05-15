@@ -1,6 +1,6 @@
 # 3D SCTransNet for Medical Image Segmentation
 本项目是哈尔滨工业大学（威海）本科毕业论文《基于融合交叉注意力Transformer的3D医学图像小目标分割方法》的代码实现。
-对原用于2D 红外小目标分割任务的**SCTransNet**（Yuan et al., TGRS 2024）进行3D扩展与改进以适配3D 医学图像分割。
+对原用于2D 红外小目标分割任务的**SCTransNet**（Yuan et al., TGRS 2024）进行3D扩展与改进以适配3D 医学图像分割。  
 原SCTransNet：[Github](https://github.com/xdFai/SCTransNet)，[Paper](https://ieeexplore.ieee.org/document/10486932)。
 ## 1.运行环境
 操作系统：Ubuntu 22.04
